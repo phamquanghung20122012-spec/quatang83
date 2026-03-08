@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chúc mừng 8-3 - Món quà từ trái tim</title>
+    <!-- Thư viện AI nhận diện bàn tay -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    
+    <style>
+        body, html {
+            margin: 0; padding: 0; width: 100%; height: 100%;
+            background-color: #111; color: white;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            overflow: hidden; display: flex; justify-content: center; align-items: center;
+        }
+        #intro-screen {
+            position: absolute; z-index: 100; top: 0; left: 0; width: 100vw; height: 100vh;
+            background: linear-gradient(135deg, #ff9a9e 0%, #fecfef 99%, #fecfef 100%);
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+            transition: opacity 1s ease-in-out;
+        }
+        #start-btn {
+            padding: 15px 40px; font-size: 1.5rem; font-weight: bold;
+            color: white; background-color: #ff3385;
+            border: none; border-radius: 50px; cursor: pointer;
+            box-shadow: 0 10px 20px rgba(255, 51, 133, 0.4);
+            transition: transform 0.2s, background-color 0.2s;
+        }
+        #start-btn:hover {
+            transform: scale(1.1); background-color: #e6005c;
+        }
+        #start-btn:disabled {
+            background-color: #cccccc; cursor: not-allowed; transform: none; box-shadow: none;
+        }
+        #cam-container {
+            position: relative; width: 100vw; height: 100vh;
+            display: flex; justify-content: center; align-items: center;
+            opacity: 0; transition: opacity 1s ease-in-out;
+        }
+        canvas.output_canvas {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover;
+            transform: scaleX(-1);
+        }
+        #message-box {
+            position: absolute; z-index: 10; font-size: 1.8rem; font-weight: bold; text-align: center;
+            text-shadow: 2px 2px 10px rgba(0,0,0,0.8); background: rgba(0, 0, 0, 0.5); 
+            padding: 15px 30px; border-radius: 20px; transition: all 0.5s ease;
+            bottom: 10%;
+        }
+        #scene-container {
+            position: absolute; top: 0; left: 0; width: 100vw; height: 100vh;
+            background: radial-gradient(circle, #fff0f6 0%, #ffe6f2 100%); 
+            display: none; opacity: 0;
+            transition: opacity 2s ease-in-out; overflow: hidden;
+        }
+        #tree_canvas {
+            position: absolute; bottom: 0; left: 50%; transform: translateX(-50%);
+            transition: transform 3s ease-in-out;
+            max-height: 90vh;
+        }
+        #tree_canvas.move-right { transform: translateX(10%); }
+        
+        #final-text {
+            position: absolute; top: 40%; left: 35%; transform: translate(-50%, -50%);
+            font-size: 3.5rem; font-weight: bold; color: #ff3385;
+            text-shadow: 2px 2px 5px rgba(255,255,255,0.8);
+            opacity: 0; transition: opacity 2s ease-in-out; text-align: center; width: 80%;
+        }
+        @media (max-width: 768px) {
+            #final-text { font-size: 2rem; left: 50%; top: 20%; width: 90%; }
+            #tree_canvas.move-right { transform: translateX(-50%) scale(0.8); }
+        }
+    </style>
+</head>
+<body>
+    <!-- File nhạc: Đảm bảo bạn có file nhac.mp3 nằm cùng thư mục với file HTML này -->
+    <audio id="bg-music" src="nhac.mp3" loop></audio>
+
+    <div id="intro-screen">
+        <h1 style="color: #ff3385; text-shadow: 2px 2px 4px white; margin-bottom: 40px; font-size: 2.5rem; text-align: center; padding: 0 20px;">
+            Có một món quà nhỏ dành cho bạn 🎁
+        </h1>
+        <button id="start-btn">Mở quà ngay</button>
+        <p style="margin-top: 20px; color: #ff3385; font-weight: 500;">(Hãy cho phép trình duyệt truy cập Camera nhé)</p>
+    </div>
+
+    <div id="cam-container">
+        <!-- Đã thêm autoplay và playsinline để camera hoạt động tốt trên mọi thiết bị -->
+        <video class="input_video" style="display: none;" autoplay playsinline></video>
+        <canvas class="output_canvas" width="1280" height="720"></canvas>
+        <div id="message-box">Đang khởi tạo camera...</div>
+    </div>
+
+    <div id="scene-container">
+        <canvas id="tree_canvas" width="1000" height="900"></canvas>
+        <div id="final-text">Chúc bạn mùng 8 - 3<br>luôn rạng rỡ và xinh đẹp! 🌸</div>
+    </div>
+
+    <script>
+        const videoElement = document.querySelector('.input_video');
+        const canvasElement = document.querySelector('.output_canvas');
+        const canvasCtx = canvasElement.getContext('2d');
+        const messageBox = document.getElementById('message-box');
+        const bgMusic = document.getElementById('bg-music');
+        
+        let currentState = 0; 
+        let heartTimer = null;
+
+        // --- NÚT BẮT ĐẦU VÀ KIỂM TRA QUYỀN CAMERA ---
+        document.getElementById('start-btn').addEventListener('click', async () => {
+            const btn = document.getElementById('start-btn');
+            btn.innerText = "Đang kết nối Camera...";
+            btn.disabled = true;
+
+            try {
+                // Yêu cầu quyền mở Camera trước
+                await navigator.mediaDevices.getUserMedia({ video: true });
+                
+                // Kích hoạt nhạc ẩn (volume = 0) để sẵn sàng phát
+                bgMusic.volume = 0;
+                bgMusic.play().catch(e => console.log("Chưa thể phát nhạc ẩn:", e));
+
+                // Bắt đầu chuyển cảnh
+                const introScreen = document.getElementById('intro-screen');
+                introScreen.style.opacity = '0';
+                
+                setTimeout(() => {
+                    introScreen.style.display = 'none';
+                    document.getElementById('cam-container').style.opacity = '1';
+                    messageBox.innerText = "Tay bạn đâu nhỉ?";
+                    camera.start(); // Bật AI Camera
+                }, 1000);
+
+            } catch (err) {
+                // Nếu người dùng chọn "Block/Chặn" Camera, hoặc lỗi trình duyệt
+                alert("Không thể mở Camera! Vui lòng cho phép trang web truy cập Camera trên trình duyệt của bạn nhé.");
+                btn.innerText = "Mở quà ngay";
+                btn.disabled = false;
+            }
+        });
+
+        // --- NHẬN DIỆN BÀN TAY ---
+        function onResults(results) {
+            if (currentState >= 2) return;
+            canvasCtx.save();
+            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+            canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                for (const landmarks of results.multiHandLandmarks) {
+                    drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {color: '#ffffff', lineWidth: 2});
+                    drawLandmarks(canvasCtx, landmarks, {color: '#ff66b2', lineWidth: 1, radius: 3});
+                }
+                if (currentState === 0) {
+                    currentState = 1;
+                    messageBox.innerText = "Lấy 2 tay tạo hình trái tim ❤️";
+                }
+
+                if (results.multiHandLandmarks.length === 2) {
+                    let hand1 = results.multiHandLandmarks[0];
+                    let hand2 = results.multiHandLandmarks[1];
+                    
+                    let thumbTip1 = hand1[4], thumbTip2 = hand2[4];     
+                    let indexTip1 = hand1[8], indexTip2 = hand2[8];     
+                    let distIndex = Math.hypot(indexTip1.x - indexTip2.x, indexTip1.y - indexTip2.y);
+                    let distThumb = Math.hypot(thumbTip1.x - thumbTip2.x, thumbTip1.y - thumbTip2.y);
+
+                    if (distIndex < 0.25 && distThumb < 0.25) {
+                        if (!heartTimer) {
+                            heartTimer = setTimeout(() => {
+                                if(currentState < 2) {
+                                    currentState = 2;
+                                    messageBox.innerText = "Ôi, trái tim xinh quá! 😍";
+                                    
+                                    // BẬT TO ÂM LƯỢNG NHẠC LÊN KHI LÀM XONG TRÁI TIM
+                                    bgMusic.volume = 1.0;
+                                    if(bgMusic.paused) {
+                                        bgMusic.play().catch(e => console.log("Lỗi nhạc:", e));
+                                    }
+
+                                    setTimeout(startScene2, 2000);
+                                }
+                            }, 800);
+                        }
+                    } else {
+                        clearTimeout(heartTimer); heartTimer = null;
+                    }
+                }
+            } else {
+                if (currentState === 1) {
+                    currentState = 0;
+                    messageBox.innerText = "Tay bạn đâu rồi?";
+                }
+            }
+            canvasCtx.restore();
+        }
+
+        const hands = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
+        hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
+        hands.onResults(onResults);
+
+        const camera = new Camera(videoElement, {
+            onFrame: async () => { await hands.send({image: videoElement}); },
+            width: 1280, height: 720
+        });
+
+        // --- CHUYỂN CẢNH CÂY MỌC ---
+        function startScene2() {
+            camera.stop();
+            document.getElementById('cam-container').style.opacity = '0';
+
+            setTimeout(() => {
+                document.getElementById('cam-container').style.display = 'none';
+                let scene = document.getElementById('scene-container');
+                scene.style.display = 'block';
+                void scene.offsetWidth;
+                scene.style.opacity = '1';
+                initTree();
+            }, 1000);
+        }
+
+        const treeCanvas = document.getElementById('tree_canvas');
+        const tCtx = treeCanvas.getContext('2d');
+        let branches = []; let leaves = []; let globalFalling = false;
+
+        class Branch {
+            constructor(startX, startY, length, angle, width, depth) {
+                this.startX = startX; this.startY = startY;
+                this.length = length; this.angle = angle;
+                this.width = width; this.depth = depth;
+                this.currentLength = 0; this.grown = false;
+                this.endX = startX + length * Math.cos(angle);
+                this.endY = startY + length * Math.sin(angle);
+                this.growthSpeed = length / 40;
+            }
+            update() {
+                if (this.currentLength < this.length) {
+                    this.currentLength += this.growthSpeed;
+                } else if (!this.grown) {
+                    this.grown = true;
+                    if (this.depth > 0) {
+                        let offset1 = -Math.PI / 6 + (Math.random() * 0.2 - 0.1);
+                        let offset2 = Math.PI / 5 + (Math.random() * 0.2 - 0.1);
+                        branches.push(new Branch(this.endX, this.endY, this.length * 0.75, this.angle + offset1, this.width * 0.7, this.depth - 1));
+                        branches.push(new Branch(this.endX, this.endY, this.length * 0.75, this.angle + offset2, this.width * 0.7, this.depth - 1));
+                    } else {
+                        for(let i = 0; i < 3; i++) leaves.push(new Leaf(this.endX, this.endY));
+                    }
+                }
+            }
+            draw(ctx) {
+                let cx = this.startX + this.currentLength * Math.cos(this.angle);
+                let cy = this.startY + this.currentLength * Math.sin(this.angle);
+                ctx.beginPath(); ctx.moveTo(this.startX, this.startY); ctx.lineTo(cx, cy);
+                ctx.lineWidth = this.width; ctx.strokeStyle = '#4a2c2a'; ctx.lineCap = 'round'; ctx.stroke();
+            }
+        }
+
+        class Leaf {
+            constructor(originX, originY) {
+                this.originX = originX + (Math.random() * 10 - 5);
+                this.originY = originY + (Math.random() * 10 - 5);
+                this.x = this.originX; this.y = this.originY;
+                this.size = 0; this.maxSize = Math.random() * 5 + 5;
+                this.isFalling = false;
+                this.vx = (Math.random() - 0.5) * 2; this.vy = Math.random() * 1.5 + 1;
+                this.angle = Math.random() * Math.PI * 2; this.spin = (Math.random() - 0.5) * 0.05;
+            }
+            update() {
+                if (this.size < this.maxSize && !this.isFalling) this.size += 0.1; 
+                if (globalFalling && !this.isFalling && Math.random() < 0.005) this.isFalling = true;
+                
+                if (this.isFalling) {
+                    this.x += this.vx + Math.sin(this.angle) * 1;
+                    this.y += this.vy; this.angle += this.spin;
+                    if (this.y > treeCanvas.height + 20) {
+                        this.y = -20; this.x = Math.random() * treeCanvas.width;
+                    }
+                }
+            }
+            draw(ctx) {
+                if (this.size <= 0.1) return;
+                ctx.save(); ctx.translate(this.x, this.y); ctx.rotate(this.angle);
+                ctx.beginPath(); ctx.ellipse(0, 0, this.size, this.size / 1.5, 0, 0, Math.PI * 2);
+                ctx.fillStyle = 'rgba(255, 182, 193, 0.9)'; ctx.fill(); ctx.restore();
+            }
+        }
+
+        function animateFrame() {
+            tCtx.clearRect(0, 0, treeCanvas.width, treeCanvas.height);
+            for (let b of branches) { b.update(); b.draw(tCtx); }
+            for (let l of leaves) { l.update(); l.draw(tCtx); }
+            requestAnimationFrame(animateFrame);
+        }
+
+        function initTree() {
+            branches.push(new Branch(treeCanvas.width / 2, treeCanvas.height, 160, -Math.PI / 2, 15, 8));
+            animateFrame();
+            setTimeout(() => globalFalling = true, 4000);
+            setTimeout(() => {
+                if (window.innerWidth > 768) treeCanvas.classList.add('move-right');
+                document.getElementById('final-text').style.opacity = '1';
+            }, 6000);
+        }
+    </script> 
+</body>
+</html>
